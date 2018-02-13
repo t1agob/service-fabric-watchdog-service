@@ -72,7 +72,7 @@ namespace Microsoft.ServiceFabric.WatchdogService
         /// <summary>
         /// Cleanup operations. Not tied to a controller.
         /// </summary>
-        private CleanupOperations _cleanupOperations = null;
+        //private CleanupOperations _cleanupOperations = null;
 
         /// <summary>
         /// CancellationToken instance assigned in RunAsync.
@@ -93,6 +93,11 @@ namespace Microsoft.ServiceFabric.WatchdogService
         /// AI telemetry instance.
         /// </summary>
         private IWatchdogTelemetry _telemetry = null;
+
+        /// <summary>
+        /// Logic App Alert instance.
+        /// </summary>
+        private IWatchdogWebhook _logicAppAlert = null;
 
         #endregion
 
@@ -247,11 +252,11 @@ namespace Microsoft.ServiceFabric.WatchdogService
                 hi.SequenceNumber = HealthInformation.AutoSequenceNumber;
                 this.Partition.ReportPartitionHealth(hi);
 
-                hi = new HealthInformation(this.Context.ServiceName.AbsoluteUri, "CleanupOperations", this._cleanupOperations.Health);
-                hi.TimeToLive = interval;
-                hi.RemoveWhenExpired = false;
-                hi.SequenceNumber = HealthInformation.AutoSequenceNumber;
-                this.Partition.ReportPartitionHealth(hi);
+                //hi = new HealthInformation(this.Context.ServiceName.AbsoluteUri, "CleanupOperations", this._cleanupOperations.Health);
+                //hi.TimeToLive = interval;
+                //hi.RemoveWhenExpired = false;
+                //hi.SequenceNumber = HealthInformation.AutoSequenceNumber;
+                //this.Partition.ReportPartitionHealth(hi);
             }
             catch (Exception ex)
             {
@@ -313,6 +318,13 @@ namespace Microsoft.ServiceFabric.WatchdogService
                             health.AggregatedHealthState,
                             cancellationToken);
 
+                    // Report error to Logic App in case of unhealthy condition.
+                    await
+                        this._logicAppAlert.ReportClusterError(
+                            this.Context.NodeContext.IPAddressOrFQDN,
+                            health.AggregatedHealthState,
+                            cancellationToken);
+
                     // Get the state of each of the applications running within the cluster. Report anything that is unhealthy.
                     foreach (ApplicationHealthState appHealth in health.ApplicationHealthStates)
                     {
@@ -328,6 +340,15 @@ namespace Microsoft.ServiceFabric.WatchdogService
                                     appHealth.AggregatedHealthState,
                                     cancellationToken);
                         }
+
+                        // Report error to Logic App in case of unhealthy condition.
+                        await
+                            this._logicAppAlert.ReportApplicationError(
+                                this.Context.NodeContext.IPAddressOrFQDN,
+                                this.Context.NodeContext.NodeName,
+                                appHealth.ApplicationName.AbsoluteUri,
+                                appHealth.AggregatedHealthState,
+                                cancellationToken);
                     }
 
                     // Get the state of each of the nodes running within the cluster.
@@ -345,6 +366,14 @@ namespace Microsoft.ServiceFabric.WatchdogService
                                     nodeHealth.AggregatedHealthState,
                                     cancellationToken);
                         }
+
+                        // Report error to Logic App in case of unhealthy condition.
+                        await
+                            this._logicAppAlert.ReportNodeError(
+                                this.Context.NodeContext.IPAddressOrFQDN,
+                                this.Context.NodeContext.NodeName,
+                                nodeHealth.AggregatedHealthState,
+                                cancellationToken);
                     }
                 }
             }
@@ -368,7 +397,13 @@ namespace Microsoft.ServiceFabric.WatchdogService
                 {
                     this._telemetry.Key = this.Settings.Sections[WatchdogConfigSectionName].Parameters["AIKey"].Value;
                 }
+                
+                if(this._logicAppAlert != null)
+                {
+                    this._logicAppAlert.AlertTimeout = this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "AlertsTimeout", TimeSpan.FromHours(2));
+                    this._logicAppAlert.WebhookUrl = this.Settings.Sections[WatchdogConfigSectionName].Parameters["LogicAppsWebhook"].Value;
 
+                }
                 this.HealthReportInterval = this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "WatchdogHealthReportInterval", TimeSpan.FromSeconds(60));
 
                 this._healthCheckOperations.TimerInterval = this.GetConfigValueAsTimeSpan(
@@ -376,11 +411,11 @@ namespace Microsoft.ServiceFabric.WatchdogService
                     "HealthCheckInterval",
                     TimeSpan.FromMinutes(5));
                 this._metricsOperations.TimerInterval = this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "MetricInterval", TimeSpan.FromMinutes(5));
-                this._cleanupOperations.Endpoint = this.GetConfigValueAsString(WatchdogConfigSectionName, "DiagnosticEndpoint");
-                this._cleanupOperations.SasToken = this.GetConfigValueAsString(WatchdogConfigSectionName, "DiagnosticSasToken");
-                this._cleanupOperations.TimerInterval = this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "DiagnosticInterval", TimeSpan.FromMinutes(2));
-                this._cleanupOperations.TimeToKeep = this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "DiagnosticTimeToKeep", TimeSpan.FromDays(10));
-                this._cleanupOperations.TargetCount = this.GetConfigValueAsInteger(WatchdogConfigSectionName, "DiagnosticTargetCount", 8000);
+                //this._cleanupOperations.Endpoint = this.GetConfigValueAsString(WatchdogConfigSectionName, "DiagnosticEndpoint");
+                //this._cleanupOperations.SasToken = this.GetConfigValueAsString(WatchdogConfigSectionName, "DiagnosticSasToken");
+                //this._cleanupOperations.TimerInterval = this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "DiagnosticInterval", TimeSpan.FromMinutes(2));
+                //this._cleanupOperations.TimeToKeep = this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "DiagnosticTimeToKeep", TimeSpan.FromDays(10));
+                //this._cleanupOperations.TargetCount = this.GetConfigValueAsInteger(WatchdogConfigSectionName, "DiagnosticTargetCount", 8000);
             }
         }
 
@@ -562,6 +597,8 @@ namespace Microsoft.ServiceFabric.WatchdogService
 
             // Create the operations classes.
             this._telemetry = new AiTelemetry(this.GetConfigValueAsString(WatchdogConfigSectionName, "AIKey"));
+            this._logicAppAlert = new LogicAppErrorAlert(this.GetConfigValueAsString(WatchdogConfigSectionName, "LogicAppsWebhook"),
+                this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "AlertsTimeout"));
             this._healthCheckOperations = new HealthCheckOperations(
                 this,
                 this._telemetry,
@@ -572,13 +609,13 @@ namespace Microsoft.ServiceFabric.WatchdogService
                 this._telemetry,
                 this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "MetricInterval", TimeSpan.FromMinutes(5)),
                 cancellationToken);
-            this._cleanupOperations = new CleanupOperations(this._telemetry, TimeSpan.FromMinutes(2), cancellationToken)
-            {
-                Endpoint = this.GetConfigValueAsString(WatchdogConfigSectionName, "DiagnosticEndpoint"),
-                SasToken = this.GetConfigValueAsString(WatchdogConfigSectionName, "DiagnosticSasToken"),
-                TimeToKeep = this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "DiagnosticTimeToKeep", TimeSpan.FromDays(10)),
-                TimerInterval = this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "DiagnosticInterval", TimeSpan.FromMinutes(2))
-            };
+            //this._cleanupOperations = new CleanupOperations(this._telemetry, TimeSpan.FromMinutes(2), cancellationToken)
+            //{
+            //    Endpoint = this.GetConfigValueAsString(WatchdogConfigSectionName, "DiagnosticEndpoint"),
+            //    SasToken = this.GetConfigValueAsString(WatchdogConfigSectionName, "DiagnosticSasToken"),
+            //    TimeToKeep = this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "DiagnosticTimeToKeep", TimeSpan.FromDays(10)),
+            //    TimerInterval = this.GetConfigValueAsTimeSpan(WatchdogConfigSectionName, "DiagnosticInterval", TimeSpan.FromMinutes(2))
+            //};
 
             // Register the watchdog health check.
             await this.RegisterHealthCheckAsync(cancellationToken).ConfigureAwait(false);

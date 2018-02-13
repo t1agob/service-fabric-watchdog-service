@@ -161,6 +161,8 @@
     <Compile Include="Controllers\HealthCheckController.cs" />
     <Compile Include="Controllers\WatchdogController.cs" />
     <Compile Include="Controllers\MetricsController.cs" />
+    <Compile Include="Interfaces\IWatchdogWebhook.cs" />
+    <Compile Include="LogicAppErrorAlert.cs" />
     <Compile Include="MetricsOperations.cs" />
     <Compile Include="InitializationCallbackAdapter.cs" />
     <Compile Include="Interfaces\IWatchdogService.cs" />
@@ -170,8 +172,10 @@
     <Compile Include="Models\HealthCheckScheduleItem.cs" />
     <Compile Include="Models\BondCustomSerializer.cs" />
     <Compile Include="Models\HealthCheckSerializer.cs" />
+    <Compile Include="Models\HealthDataAlertState.cs" />
     <Compile Include="Models\HttpVerb.cs" />
     <Compile Include="Models\MetricCheck.cs" />
+    <Compile Include="Models\HealthData.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="OwinCommunicationListener.cs" />
     <Compile Include="UtilAndExtensions.cs" />
